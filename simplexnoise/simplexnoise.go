@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"runtime"
+	"sync"
+	"time"
 
 	"github.com/veandco/go-sdl2/sdl"
 )
@@ -92,23 +95,43 @@ func fbm2(x, y, frequency, lacunarity, gain float32, octaves int) float32 {
 }
 
 func makeNoise(pixels []byte, frequency, lacunarity, gain float32, octaves int) {
+	var mutex = &sync.Mutex{}
+	startTime := time.Now()
 	noise := make([]float32, winWidth*winHeight)
 
-	i := 0
 	min := float32(9999.0)
 	max := float32(-9999.0)
 
-	for y := 0; y < winHeight; y++ {
-		for x := 0; x < winWidth; x++ {
-			noise[i] = turbulence(float32(x), float32(y), frequency, lacunarity, gain, octaves)
-			if noise[i] < min {
-				min = noise[i]
-			} else if noise[i] > max {
-				max = noise[i]
+	numRoutines := runtime.NumCPU()
+	var wg sync.WaitGroup
+	wg.Add(numRoutines)
+	batchSize := len(noise) / numRoutines
+
+	for i := 0; i < numRoutines; i++ {
+		go func(i int) {
+			defer wg.Done()
+			start := i * batchSize
+			end := start + batchSize - 1
+			for j := start; j < end; j++ {
+				x := j % winWidth
+				y := (j - x) / winHeight
+				noise[j] = turbulence(float32(x), float32(y), frequency, lacunarity, gain, octaves)
+				if noise[j] < min || noise[j] > max {
+					mutex.Lock()
+					if noise[j] < min {
+						min = noise[j]
+					} else if noise[j] > max {
+						max = noise[j]
+					}
+					mutex.Unlock()
+				}
 			}
-			i++
-		}
+		}(i)
 	}
+	wg.Wait()
+	elapsedTime := time.Since(startTime).Seconds() * 1000.0
+	fmt.Println(elapsedTime)
+
 	gradient := getDualGradient(color{0, 0, 175}, color{80, 160, 244}, color{12, 192, 75}, color{255, 255, 255})
 	rescaleAndDraw(noise, min, max, gradient, pixels)
 }
