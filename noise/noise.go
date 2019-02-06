@@ -5,12 +5,12 @@ import (
 	"sync"
 )
 
-// NoiseType indicates which noise MakeNoise will generate
-type NoiseType int
+// Type indicates which noise MakeNoise will generate
+type Type int
 
 const (
 	// FBM indicates Fractal Brownian Motion
-	FBM NoiseType = iota
+	FBM Type = iota
 	// TURBULENCE indicates Turbulent fractal
 	TURBULENCE
 )
@@ -44,7 +44,7 @@ func Fbm2(x, y, frequency, lacunarity, gain float32, octaves int) float32 {
 }
 
 // MakeNoise generates a 2d block of noise
-func MakeNoise(noiseType NoiseType, frequency, lacunarity, gain float32, octaves, w, h int) (noise []float32, min, max float32) {
+func MakeNoise(noiseType Type, frequency, lacunarity, gain float32, octaves, w, h int) (noise []float32, min, max float32) {
 	var mutex = &sync.Mutex{}
 	noise = make([]float32, w*h)
 
