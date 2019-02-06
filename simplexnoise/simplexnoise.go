@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"runtime"
 	"sync"
 	"time"
@@ -99,8 +100,8 @@ func makeNoise(pixels []byte, frequency, lacunarity, gain float32, octaves int) 
 	startTime := time.Now()
 	noise := make([]float32, winWidth*winHeight)
 
-	min := float32(9999.0)
-	max := float32(-9999.0)
+	min := float32(math.MaxFloat32)
+	max := float32(-math.MaxFloat32)
 
 	numRoutines := runtime.NumCPU()
 	var wg sync.WaitGroup
@@ -110,22 +111,30 @@ func makeNoise(pixels []byte, frequency, lacunarity, gain float32, octaves int) 
 	for i := 0; i < numRoutines; i++ {
 		go func(i int) {
 			defer wg.Done()
+			innerMin := float32(math.MaxFloat32)
+			innerMax := float32(-math.MaxFloat32)
 			start := i * batchSize
 			end := start + batchSize - 1
 			for j := start; j < end; j++ {
 				x := j % winWidth
 				y := (j - x) / winHeight
 				noise[j] = turbulence(float32(x), float32(y), frequency, lacunarity, gain, octaves)
-				if noise[j] < min || noise[j] > max {
-					mutex.Lock()
-					if noise[j] < min {
-						min = noise[j]
-					} else if noise[j] > max {
-						max = noise[j]
-					}
-					mutex.Unlock()
+
+				if noise[j] < innerMin {
+					innerMin = noise[j]
+				} else if noise[j] > innerMax {
+					innerMax = noise[j]
 				}
 			}
+
+			mutex.Lock()
+			if innerMin < min {
+				min = innerMin
+			}
+			if innerMax > max {
+				max = innerMax
+			}
+			mutex.Unlock()
 		}(i)
 	}
 	wg.Wait()
