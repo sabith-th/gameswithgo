@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/sabith-th/games_with_go/noise"
 	"github.com/veandco/go-sdl2/sdl"
 )
 
@@ -23,6 +24,61 @@ type rgba struct {
 
 type position struct {
 	x, y float32
+}
+
+func lerp(b1, b2 byte, pct float32) byte {
+	return byte(float32(b1) + pct*(float32(b2)-float32(b1)))
+}
+
+func rgbalerp(c1, c2 rgba, pct float32) rgba {
+	return rgba{lerp(c1.r, c2.r, pct), lerp(c1.g, c2.g, pct), lerp(c1.b, c2.b, pct)}
+}
+
+func getGradient(c1, c2 rgba) []rgba {
+	result := make([]rgba, 256)
+	for i := range result {
+		pct := float32(i) / float32(255)
+		result[i] = rgbalerp(c1, c2, pct)
+	}
+	return result
+}
+
+func getDualGradient(c1, c2, c3, c4 rgba) []rgba {
+	result := make([]rgba, 256)
+	for i := range result {
+		pct := float32(i) / float32(255)
+		if pct < 0.5 {
+			result[i] = rgbalerp(c1, c2, pct*float32(2))
+		} else {
+			result[i] = rgbalerp(c3, c4, pct*float32(1.5)-float32(0.5))
+		}
+	}
+	return result
+}
+
+func clamp(min, max, v int) int {
+	if v < min {
+		v = min
+	} else if v > max {
+		v = max
+	}
+	return v
+}
+
+func rescaleAndDraw(noise []float32, min, max float32, gradient []rgba, w, h int) []byte {
+	result := make([]byte, w*h*4)
+	scale := 255.0 / (max - min)
+	offset := min * scale
+
+	for i := range noise {
+		noise[i] = noise[i]*scale - offset
+		c := gradient[clamp(0, 255, int(noise[i]))]
+		p := i * 4
+		result[p] = c.r
+		result[p+1] = c.g
+		result[p+2] = c.b
+	}
+	return result
 }
 
 func clear(pixels []byte) {
@@ -122,7 +178,7 @@ func loadBalloons() []texture {
 				bIndex++
 			}
 		}
-		balloonTextures[i] = texture{balloonPixels, position{0, 0}, w, h, w * 4}
+		balloonTextures[i] = texture{balloonPixels, position{float32(i * 60), float32(i * 60)}, w, h, w * 4}
 	}
 	return balloonTextures
 }
@@ -153,6 +209,11 @@ func main() {
 	defer tex.Destroy()
 
 	pixels := make([]byte, winWidth*winHeight*4)
+
+	cloudNoise, min, max := noise.MakeNoise(noise.FBM, 0.009, 0.5, 3, 3, winWidth, winHeight)
+	cloudGradient := getGradient(rgba{0, 0, 255}, rgba{255, 255, 255})
+	cloudPixels := rescaleAndDraw(cloudNoise, min, max, cloudGradient, winWidth, winHeight)
+	cloudTexture := texture{cloudPixels, position{0, 0}, winWidth, winHeight, winWidth * 4}
 	balloonTextures := loadBalloons()
 	dir := [3]int{1, 1, 1}
 
@@ -166,7 +227,7 @@ func main() {
 			}
 		}
 
-		clear(pixels)
+		cloudTexture.draw(pixels)
 
 		for i, tex := range balloonTextures {
 			tex.drawAlpha(pixels)
