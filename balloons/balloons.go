@@ -16,6 +16,7 @@ type texture struct {
 	pixels []byte
 	position
 	w, h, pitch int
+	scale       float32
 }
 
 type rgba struct {
@@ -93,6 +94,83 @@ func setPixel(x, y int, c rgba, pixels []byte) {
 		pixels[index] = c.r
 		pixels[index+1] = c.g
 		pixels[index+2] = c.b
+	}
+}
+
+func (tex *texture) drawScaled(scaleX, scaleY float32, pixels []byte) {
+	newWidth := int(float32(tex.w) * scaleX)
+	newHeight := int(float32(tex.h) * scaleY)
+	texW4 := tex.w * 4
+	for y := 0; y < newHeight; y++ {
+		fy := float32(y) / float32(newHeight) * float32(tex.h-1)
+		fyi := int(fy)
+		screenY := int(fy*scaleY) + int(tex.y)
+		screenIndex := screenY*winWidth*4 + int(tex.x)*4
+
+		for x := 0; x < newWidth; x++ {
+			fx := float32(x) / float32(newWidth) * float32(tex.w-1)
+			screenX := int(fx*scaleX) + int(tex.x)
+			if screenIndex < winHeight*winWidth*4 && screenIndex > 0 {
+				if screenX >= 0 && screenX < winWidth && screenY >= 0 && screenY < winHeight {
+					fxi4 := int(fx) * 4
+					pixels[screenIndex] = tex.pixels[fyi*texW4+fxi4]
+					screenIndex++
+					pixels[screenIndex] = tex.pixels[fyi*texW4+fxi4+1]
+					screenIndex++
+					pixels[screenIndex] = tex.pixels[fyi*texW4+fxi4+2]
+					screenIndex++
+					screenIndex++
+				}
+			}
+		}
+	}
+}
+
+func flerp(a, b, pct float32) float32 {
+	return a + (b-a)*pct
+}
+
+func blerp(c00, c01, c10, c11, tx, ty float32) float32 {
+	return flerp(flerp(c00, c10, tx), flerp(c01, c11, tx), ty)
+}
+
+func (tex *texture) drawBilinearScaled(scaleX, scaleY float32, pixels []byte) {
+	newWidth := int(float32(tex.w) * scaleX)
+	newHeight := int(float32(tex.h) * scaleY)
+	texW4 := tex.w * 4
+	for y := 0; y < newHeight; y++ {
+		fy := float32(y) / float32(newHeight) * float32(tex.h-1)
+		fyi := int(fy)
+		screenY := int(fy*scaleY) + int(tex.y)
+		screenIndex := screenY*winWidth*4 + int(tex.x)*4
+		ty := fy - float32(fyi)
+
+		for x := 0; x < newWidth; x++ {
+			fx := float32(x) / float32(newWidth) * float32(tex.w-1)
+			screenX := int(fx*scaleX) + int(tex.x)
+			if screenIndex < winHeight*winWidth*4 && screenIndex > 0 {
+				if screenX >= 0 && screenX < winWidth && screenY >= 0 && screenY < winHeight {
+					fxi := int(fx)
+
+					c00i := fyi*texW4 + fxi*4
+					c10i := fyi*texW4 + (fxi+1)*4
+					c01i := (fyi+1)*texW4 + fxi*4
+					c11i := (fyi+1)*texW4 + (fxi+1)*4
+
+					tx := fx - float32(fxi)
+
+					for i := 0; i < 4; i++ {
+						c00 := float32(tex.pixels[c00i+i])
+						c10 := float32(tex.pixels[c10i+i])
+						c01 := float32(tex.pixels[c01i+i])
+						c11 := float32(tex.pixels[c11i+i])
+
+						pixels[screenIndex] = byte(blerp(c00, c10, c01, c11, tx, ty))
+						screenIndex++
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -178,7 +256,7 @@ func loadBalloons() []texture {
 				bIndex++
 			}
 		}
-		balloonTextures[i] = texture{balloonPixels, position{float32(i * 60), float32(i * 60)}, w, h, w * 4}
+		balloonTextures[i] = texture{balloonPixels, position{float32(i * 60), float32(i * 60)}, w, h, w * 4, float32(1 + i)}
 	}
 	return balloonTextures
 }
@@ -213,7 +291,7 @@ func main() {
 	cloudNoise, min, max := noise.MakeNoise(noise.FBM, 0.009, 0.5, 3, 3, winWidth, winHeight)
 	cloudGradient := getGradient(rgba{0, 0, 255}, rgba{255, 255, 255})
 	cloudPixels := rescaleAndDraw(cloudNoise, min, max, cloudGradient, winWidth, winHeight)
-	cloudTexture := texture{cloudPixels, position{0, 0}, winWidth, winHeight, winWidth * 4}
+	cloudTexture := texture{cloudPixels, position{0, 0}, winWidth, winHeight, winWidth * 4, float32(1)}
 	balloonTextures := loadBalloons()
 	dir := [3]int{1, 1, 1}
 
@@ -230,9 +308,9 @@ func main() {
 		cloudTexture.draw(pixels)
 
 		for i, tex := range balloonTextures {
-			tex.drawAlpha(pixels)
+			tex.drawBilinearScaled(tex.scale, tex.scale, pixels)
 			balloonTextures[i].x += float32((i + 1) * dir[i])
-			if balloonTextures[i].x > float32(winWidth-200) || balloonTextures[i].x < 0 {
+			if balloonTextures[i].x > float32(winWidth-200*(1+i)) || balloonTextures[i].x < 0 {
 				dir[i] = -1 * dir[i]
 			}
 		}
